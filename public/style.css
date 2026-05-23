@@ -1,0 +1,259 @@
+:root {
+  color-scheme: dark;
+  --bg-1: #11131a;
+  --bg-2: #1c2230;
+  --panel: rgba(15, 18, 26, 0.84);
+  --panel-border: rgba(255, 255, 255, 0.12);
+  --text: #f3efe6;
+  --muted: #b7bac2;
+  --light-square: #ead7b8;
+  --dark-square: #8b5a33;
+  --accent: #7ad3ff;
+  --danger: #ff6a6a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top, rgba(122, 211, 255, 0.16), transparent 34%),
+    linear-gradient(160deg, var(--bg-1), var(--bg-2));
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.25), transparent 80%);
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 20px;
+  padding: 24px;
+}
+
+.status-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 16px;
+  padding: 18px 20px;
+  border: 1px solid var(--panel-border);
+  border-radius: 20px;
+  background: var(--panel);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+}
+
+.eyebrow {
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.72rem;
+  color: var(--accent);
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(1.6rem, 3vw, 2.6rem);
+  line-height: 1;
+}
+
+.status-text {
+  color: var(--muted);
+  font-size: 0.98rem;
+  text-align: right;
+  max-width: 40ch;
+}
+
+.board-wrap {
+  display: grid;
+  place-items: center;
+}
+
+.announcement {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(3, 5, 10, 0.62);
+  backdrop-filter: blur(6px);
+  z-index: 20;
+  pointer-events: none;
+}
+
+.announcement[hidden] {
+  display: none;
+}
+
+.announcement.show {
+  animation: announcement-fade 220ms ease-out;
+}
+
+.announcement-card {
+  width: min(560px, 92vw);
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: linear-gradient(170deg, rgba(13, 16, 24, 0.98), rgba(28, 35, 46, 0.96));
+  box-shadow: 0 26px 90px rgba(0, 0, 0, 0.56);
+  text-align: center;
+  padding: 28px 22px;
+}
+
+.announcement-kicker {
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+  font-size: 0.72rem;
+}
+
+#announcementTitle {
+  margin: 10px 0 8px;
+  font-size: clamp(1.8rem, 4.8vw, 3rem);
+  line-height: 1;
+}
+
+.announcement-detail {
+  margin: 0;
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+@keyframes announcement-fade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.board {
+  width: min(92vw, 820px);
+  aspect-ratio: 1;
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  grid-template-rows: repeat(8, 1fr);
+  gap: 0;
+  border-radius: 28px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 30px 120px rgba(0, 0, 0, 0.42);
+  transform: translateY(0);
+  animation: board-rise 520ms ease-out;
+}
+
+@keyframes board-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.square {
+  position: relative;
+  border: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  cursor: pointer;
+  background: transparent;
+  transition: filter 120ms ease, transform 120ms ease;
+}
+
+.square:hover {
+  filter: brightness(1.06);
+}
+
+.square.light {
+  background: linear-gradient(180deg, #f0dcc0, var(--light-square));
+}
+
+.square.dark {
+  background: linear-gradient(180deg, #9b6740, var(--dark-square));
+}
+
+.square.selected::after,
+.square.hint::after,
+.square.in-check::after,
+.square.last-move::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.square.selected::after {
+  box-shadow: inset 0 0 0 5px rgba(122, 211, 255, 0.95);
+}
+
+.square.hint::after {
+  background: radial-gradient(circle, rgba(122, 211, 255, 0.4) 0 16%, transparent 18%);
+}
+
+.square.in-check::after {
+  box-shadow: inset 0 0 0 5px rgba(255, 106, 106, 0.92);
+}
+
+.square.last-move::before {
+  background: rgba(255, 240, 164, 0.16);
+}
+
+.piece {
+  width: 86%;
+  height: 86%;
+  object-fit: contain;
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.28));
+  user-select: none;
+  pointer-events: none;
+}
+
+@media (max-width: 720px) {
+  .app-shell {
+    padding: 14px;
+  }
+
+  .status-bar {
+    flex-direction: column;
+    align-items: start;
+  }
+
+  .status-text {
+    text-align: left;
+  }
+
+  .board {
+    width: min(96vw, 820px);
+    border-radius: 18px;
+  }
+
+  .announcement-card {
+    padding: 22px 16px;
+  }
+}

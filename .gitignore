@@ -2,3 +2,5 @@ bin/
 .vscode/
 *.o
 *.exe
+node_modules/
+.env
