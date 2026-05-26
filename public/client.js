@@ -3,14 +3,10 @@ const statusElement = document.getElementById('statusText');
 const announcementElement = document.getElementById('announcement');
 const announcementTitleElement = document.getElementById('announcementTitle');
 const announcementDetailElement = document.getElementById('announcementDetail');
-const roomId = window.location.pathname.startsWith('/room/')
-  ? window.location.pathname.slice('/room/'.length)
-  : 'room';
+const newGameButton = document.getElementById('newGameButton');
 
-const tokenKey = `sachy-token:${roomId}`;
 let state = null;
-let myColor = null;
-let playerToken = window.sessionStorage.getItem(tokenKey) || '';
+const myColor = 'white';
 let selected = null;
 let highlightedMoves = [];
 
@@ -56,10 +52,10 @@ function pieceImagePath(piece) {
 
 function statusText() {
   if (!state) {
-    return 'Connecting...';
+    return 'Loading...';
   }
 
-  const seatLabel = myColor ? `You are ${myColor}.` : 'Spectator mode.';
+  const seatLabel = 'You are white. Bot is black.';
 
   if (state.winner) {
     return `${seatLabel} ${state.winner} wins by checkmate.`;
@@ -87,8 +83,8 @@ function gameOverMessage() {
 
   if (state.winner) {
     const winner = state.winner;
-    const didWin = myColor && myColor === winner;
-    const didLose = myColor && myColor !== winner;
+    const didWin = winner === myColor;
+    const didLose = winner !== myColor;
     const detail = didWin
       ? 'Checkmate. You won this game.'
       : didLose
@@ -210,7 +206,7 @@ function render() {
   renderAnnouncement();
 }
 
-async function postForm(url, data) {
+async function postForm(url, data = {}) {
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -227,51 +223,21 @@ async function postForm(url, data) {
   return response.json();
 }
 
-async function joinRoom() {
-  const response = await postForm(`/api/room/${roomId}/join`, { token: playerToken });
-  playerToken = response.token;
-  myColor = response.color;
-  window.sessionStorage.setItem(tokenKey, playerToken);
-  state = response.state;
-  render();
-}
-
 async function loadState() {
-  const response = await fetch(`/api/room/${roomId}/state?token=${encodeURIComponent(playerToken)}`);
+  const response = await fetch('/api/game/state');
   if (!response.ok) {
     const message = await response.json().catch(() => ({}));
-    throw new Error(message.error || 'Failed to load room state.');
+    throw new Error(message.error || 'Failed to load game state.');
   }
 
   const payload = await response.json();
   state = payload.state;
-  myColor = payload.color;
   render();
 }
 
 async function loadMoves(x, y) {
-  const response = await fetch(`/api/room/${roomId}/moves?token=${encodeURIComponent(playerToken)}&x=${x}&y=${y}`);
+  const response = await fetch(`/api/game/moves?x=${x}&y=${y}`);
   return response.json();
-}
-
-function connectStream() {
-  const source = new EventSource(`/api/room/${roomId}/events?token=${encodeURIComponent(playerToken)}`);
-
-  source.onmessage = (event) => {
-    const payload = JSON.parse(event.data);
-    state = payload.state;
-    if (payload.color) {
-      myColor = payload.color;
-    }
-
-    selected = null;
-    highlightedMoves = [];
-    render();
-  };
-
-  source.onerror = () => {
-    setStatus('Reconnecting...');
-  };
 }
 
 function clearSelection() {
@@ -288,6 +254,16 @@ async function onSquareClick(x, y) {
     return;
   }
 
+  // Game over — any click on the board restarts.
+  if (state.winner || state.draw) {
+    void startNewGame();
+    return;
+  }
+
+  if (state.turn !== myColor) {
+    return;
+  }
+
   const currentPiece = state.board[y][x];
 
   if (selected) {
@@ -295,8 +271,7 @@ async function onSquareClick(x, y) {
 
     if (targetMove) {
       try {
-        await postForm(`/api/room/${roomId}/move`, {
-          token: playerToken,
+        const payload = await postForm('/api/game/move', {
           fromX: String(targetMove.fromX),
           fromY: String(targetMove.fromY),
           toX: String(targetMove.toX),
@@ -306,8 +281,17 @@ async function onSquareClick(x, y) {
           enPassant: targetMove.enPassant ? 'true' : 'false',
         });
 
+        state = payload.state;
         clearSelection();
         render();
+
+        // If still going it's now the bot's turn — pause, then fetch its move.
+        if (!state.winner && !state.draw && state.turn === 'black') {
+          await new Promise((resolve) => setTimeout(resolve, 650));
+          const botPayload = await postForm('/api/game/bot-move');
+          state = botPayload.state;
+          render();
+        }
       } catch (error) {
         setStatus(error.message);
         await loadState();
@@ -317,7 +301,7 @@ async function onSquareClick(x, y) {
     }
   }
 
-  if (currentPiece && currentPiece.color === myColor && state.turn === myColor && !state.winner && !state.draw) {
+  if (currentPiece && currentPiece.color === myColor) {
     selected = { x, y };
 
     try {
@@ -337,11 +321,26 @@ async function onSquareClick(x, y) {
   render();
 }
 
+async function startNewGame() {
+  try {
+    const payload = await postForm('/api/game/new');
+    state = payload.state;
+    clearSelection();
+    render();
+  } catch (error) {
+    setStatus(error.message);
+  }
+}
+
+if (newGameButton) {
+  newGameButton.addEventListener('click', () => {
+    void startNewGame();
+  });
+}
+
 async function boot() {
   try {
-    await joinRoom();
     await loadState();
-    connectStream();
   } catch (error) {
     setStatus(error.message);
   }

@@ -1,6 +1,6 @@
-# Sachy Online
+# Sachy Local
 
-This workspace now runs as a browser-based multiplayer chess game with a native C++ server and C++ move validation.
+This workspace runs as a local terminal chess game with C++ move validation and a built-in bot opponent.
 
 ## Run locally
 
@@ -10,10 +10,16 @@ Build it with the VS Code build task or with this command:
 g++ -std=c++17 -g -DSFML_STATIC -static-libgcc -static-libstdc++ src\main.cpp src\chess_engine.cpp src\room_server.cpp -o bin\sachy.exe -I C:\msys64\ucrt64\include -L C:\msys64\ucrt64\lib -lsfml-network-s -lsfml-system-s -lws2_32
 ```
 
-Run `bin\sachy.exe`, open `http://localhost:3000`, and copy the room URL from the browser. Anyone who opens the same room URL joins the same game.
+Run `bin\sachy.exe` in a terminal and play as white against the black bot.
+
+Commands:
+
+- Enter moves in coordinate format like `e2e4`.
+- Enter `new` to reset the game.
+- Enter `quit` to exit.
 
 ## Files
 
-- `src/room_server.cpp` serves the room pages and event stream.
+- `src/main.cpp` runs the local terminal game loop and bot move selection.
 - `src/chess_engine.cpp` contains the chess rules and move validation.
-- `public/client.js` renders the board and sends moves.
+- `src/room_server.cpp` and `public/client.js` are no longer required for local play.

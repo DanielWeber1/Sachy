@@ -1,15 +1,16 @@
 #include "room_server.hpp"
 
 #include <algorithm>
-#include <chrono>
+#include <array>
 #include <cctype>
 #include <cstdlib>
-#include <filesystem>
 #include <fstream>
-#include <iomanip>
 #include <iostream>
+#include <limits>
+#include <optional>
 #include <random>
 #include <sstream>
+#include <stdexcept>
 #include <thread>
 
 using namespace std;
@@ -58,25 +59,100 @@ namespace
     return value;
   }
 
-  string nowString()
+  int pieceValue(chess::PieceType type)
   {
-    const auto now = chrono::system_clock::now();
-    const auto time = chrono::system_clock::to_time_t(now);
-    tm localTime{};
-#ifdef _WIN32
-    localtime_s(&localTime, &time);
-#else
-    localTime = *localtime(&time);
-#endif
+    switch (type)
+    {
+      case chess::PieceType::Pawn: return 100;
+      case chess::PieceType::Knight: return 320;
+      case chess::PieceType::Bishop: return 330;
+      case chess::PieceType::Rook: return 500;
+      case chess::PieceType::Queen: return 900;
+      case chess::PieceType::King: return 20000;
+    }
 
-    ostringstream out;
-    out << put_time(&localTime, "%Y-%m-%dT%H:%M:%S");
-    return out.str();
+    return 0;
+  }
+
+  int evaluateForBlack(const chess::State &state)
+  {
+    if (state.winner)
+    {
+      return *state.winner == chess::Color::Black ? 1000000 : -1000000;
+    }
+
+    if (state.draw)
+    {
+      return 0;
+    }
+
+    int score = 0;
+    for (int y = 0; y < 8; ++y)
+    {
+      for (int x = 0; x < 8; ++x)
+      {
+        const auto &cell = state.board[y][x];
+        if (!cell)
+        {
+          continue;
+        }
+
+        const int value = pieceValue(cell->type);
+        score += (cell->color == chess::Color::Black ? value : -value);
+      }
+    }
+
+    return score;
+  }
+
+  optional<chess::Move> chooseBotMove(const chess::State &state)
+  {
+    const vector<chess::Move> moves = chess::legalMovesForColor(state, chess::Color::Black);
+    if (moves.empty())
+    {
+      return nullopt;
+    }
+
+    static random_device device;
+    static mt19937 rng(device());
+
+    int bestScore = numeric_limits<int>::min();
+    vector<chess::Move> bestMoves;
+
+    for (const auto &move : moves)
+    {
+      try
+      {
+        const chess::State next = chess::applyMove(state, move);
+        const int score = evaluateForBlack(next);
+
+        if (score > bestScore)
+        {
+          bestScore = score;
+          bestMoves.clear();
+          bestMoves.push_back(move);
+        }
+        else if (score == bestScore)
+        {
+          bestMoves.push_back(move);
+        }
+      }
+      catch (...)
+      {
+      }
+    }
+
+    if (bestMoves.empty())
+    {
+      return nullopt;
+    }
+
+    uniform_int_distribution<size_t> pick(0, bestMoves.size() - 1);
+    return bestMoves[pick(rng)];
   }
 }
 
-RoomServer::RoomServer(unsigned short port)
-  : port_(port)
+RoomServer::RoomServer(unsigned short port) : port_(port), state_(chess::createInitialState())
 {
   if (listener_.listen(port_) != sf::Socket::Done)
   {
@@ -84,42 +160,29 @@ RoomServer::RoomServer(unsigned short port)
   }
 }
 
-shared_ptr<RoomServer::Room> RoomServer::getRoom(const string &roomId)
+void RoomServer::resetGame()
 {
-  lock_guard<mutex> guard(roomsMutex_);
-  const auto it = find_if(rooms_.begin(), rooms_.end(), [&](const shared_ptr<Room> &room)
-  {
-    return room->id == roomId;
-  });
+  lock_guard<mutex> guard(gameMutex_);
+  state_ = chess::createInitialState();
+}
 
-  if (it != rooms_.end())
+bool RoomServer::applyBotMove()
+{
+  lock_guard<mutex> guard(gameMutex_);
+
+  if (state_.winner || state_.draw || state_.turn != chess::Color::Black)
   {
-    return *it;
+    return false;
   }
 
-  auto room = make_shared<Room>();
-  room->id = roomId;
-  room->state = chess::createInitialState();
-  room->createdAt = makeTimestamp();
-  room->updatedAt = room->createdAt;
-  rooms_.push_back(room);
-  return room;
-}
+  const optional<chess::Move> move = chooseBotMove(state_);
+  if (!move)
+  {
+    return false;
+  }
 
-string RoomServer::generateToken()
-{
-  static random_device device;
-  static mt19937_64 engine(device());
-  static uniform_int_distribution<unsigned long long> distribution;
-
-  ostringstream out;
-  out << hex << distribution(engine) << distribution(engine);
-  return out.str();
-}
-
-string RoomServer::makeTimestamp()
-{
-  return nowString();
+  state_ = chess::applyMove(state_, *move);
+  return true;
 }
 
 string RoomServer::urlDecode(const string &value)
@@ -207,9 +270,7 @@ string RoomServer::statusLine(int code)
   {
     case 200: return "HTTP/1.1 200 OK";
     case 204: return "HTTP/1.1 204 No Content";
-    case 302: return "HTTP/1.1 302 Found";
     case 400: return "HTTP/1.1 400 Bad Request";
-    case 403: return "HTTP/1.1 403 Forbidden";
     case 404: return "HTTP/1.1 404 Not Found";
     default: return "HTTP/1.1 500 Internal Server Error";
   }
@@ -257,7 +318,7 @@ string RoomServer::jsonEscape(const string &value)
   return out.str();
 }
 
-string RoomServer::roomHtml(const string &roomId)
+string RoomServer::pageHtml()
 {
   ostringstream out;
   out << "<!doctype html>"
@@ -265,14 +326,17 @@ string RoomServer::roomHtml(const string &roomId)
       << "<head>"
       << "<meta charset=\"utf-8\" />"
       << "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />"
-      << "<title>Sachy " << jsonEscape(roomId) << "</title>"
+      << "<title>Sachy vs Bot</title>"
       << "<link rel=\"stylesheet\" href=\"/public/style.css\" />"
       << "</head>"
       << "<body>"
       << "<main class=\"app-shell\">"
       << "<section class=\"status-bar\">"
-      << "<div><div class=\"eyebrow\">Online chess</div><h1>Room " << jsonEscape(roomId) << "</h1></div>"
+      << "<div><div class=\"eyebrow\">Online chess</div><h1>Sachy vs Bot</h1></div>"
+      << "<div style=\"display:flex;gap:0.5rem;align-items:center;\">"
+      << "<button id=\"newGameButton\" type=\"button\">New game</button>"
       << "<div id=\"statusText\" class=\"status-text\">Connecting...</div>"
+      << "</div>"
       << "</section>"
       << "<section class=\"board-wrap\"><div id=\"board\" class=\"board\" aria-label=\"Chess board\"></div></section>"
       << "<section id=\"announcement\" class=\"announcement\" aria-live=\"polite\" aria-atomic=\"true\" hidden>"
@@ -287,45 +351,7 @@ string RoomServer::roomHtml(const string &roomId)
   return out.str();
 }
 
-string RoomServer::seatForToken(const Room &room, const string &token)
-{
-  if (!token.empty() && room.white && room.white->token == token)
-  {
-    return "white";
-  }
-
-  if (!token.empty() && room.black && room.black->token == token)
-  {
-    return "black";
-  }
-
-  return "spectator";
-}
-
-string RoomServer::assignSeat(Room &room, const string &token)
-{
-  const string existingSeat = seatForToken(room, token);
-  if (existingSeat != "spectator")
-  {
-    return existingSeat;
-  }
-
-  if (!room.white)
-  {
-    room.white = PlayerSlot{token, makeTimestamp()};
-    return "white";
-  }
-
-  if (!room.black)
-  {
-    room.black = PlayerSlot{token, makeTimestamp()};
-    return "black";
-  }
-
-  return "spectator";
-}
-
-string RoomServer::roomStatusText(const chess::State &state)
+string RoomServer::statusTextFor(const chess::State &state)
 {
   if (state.winner)
   {
@@ -343,6 +369,22 @@ string RoomServer::roomStatusText(const chess::State &state)
   }
 
   return chess::colorToString(state.turn) + " to move";
+}
+
+string RoomServer::stateEnvelopeJson(const chess::State &state)
+{
+  ostringstream out;
+  out << "{"
+      << "\"playerColor\":\"white\"," 
+      << "\"state\":" << chess::stateToJson(state) << ","
+      << "\"status\":\"" << jsonEscape(statusTextFor(state)) << "\""
+      << "}";
+  return out.str();
+}
+
+string RoomServer::movesResponseJson(const vector<chess::Move> &moves)
+{
+  return chess::movesToJson(moves);
 }
 
 bool RoomServer::startsWith(const string &value, const string &prefix)
@@ -408,127 +450,6 @@ string RoomServer::findAssetPath(const string &requestPath)
   return {};
 }
 
-string RoomServer::buildStateEnvelope(const Room &room, const string &seat)
-{
-  ostringstream out;
-  out << "{"
-      << "\"roomId\":\"" << jsonEscape(room.id) << "\","
-      << "\"color\":";
-
-  if (seat == "white" || seat == "black")
-  {
-    out << "\"" << seat << "\"";
-  }
-  else
-  {
-    out << "null";
-  }
-
-  out << ",\"players\":{"
-      << "\"white\":" << (room.white ? "true" : "false") << ","
-      << "\"black\":" << (room.black ? "true" : "false")
-      << "},"
-      << "\"state\":" << chess::stateToJson(room.state) << ","
-      << "\"shareUrl\":\"/room/" << jsonEscape(room.id) << "\","
-      << "\"status\":\"" << jsonEscape(roomStatusText(room.state)) << "\""
-      << "}";
-  return out.str();
-}
-
-string RoomServer::roomStateJson(const Room &room, const string &token)
-{
-  return buildStateEnvelope(room, seatForToken(room, token));
-}
-
-string RoomServer::joinResponseJson(const Room &room, const string &token, const string &seat)
-{
-  ostringstream out;
-  out << "{"
-      << "\"roomId\":\"" << jsonEscape(room.id) << "\","
-      << "\"token\":\"" << jsonEscape(token) << "\","
-      << "\"color\":";
-
-  if (seat == "white" || seat == "black")
-  {
-    out << "\"" << seat << "\"";
-  }
-  else
-  {
-    out << "null";
-  }
-
-  out << ",\"status\":\"" << jsonEscape(roomStatusText(room.state)) << "\","
-      << "\"state\":" << chess::stateToJson(room.state) << ","
-      << "\"shareUrl\":\"/room/" << jsonEscape(room.id) << "\""
-      << "}";
-  return out.str();
-}
-
-string RoomServer::movesResponseJson(const vector<chess::Move> &moves)
-{
-  return chess::movesToJson(moves);
-}
-
-string RoomServer::eventPayloadJson(const Room &room, const string &token)
-{
-  ostringstream out;
-  out << "{\"state\":" << chess::stateToJson(room.state) << ",\"color\":";
-  const string seat = seatForToken(room, token);
-  if (seat == "white" || seat == "black")
-  {
-    out << "\"" << seat << "\"";
-  }
-  else
-  {
-    out << "null";
-  }
-  out << ",\"status\":\"" << jsonEscape(roomStatusText(room.state)) << "\"}";
-  return out.str();
-}
-
-chess::Move RoomServer::parseMoveParams(const vector<pair<string, string>> &params)
-{
-  chess::Move move;
-  int fromX = 0;
-  int fromY = 0;
-  int toX = 0;
-  int toY = 0;
-
-  if (!parseIntStrict(getParam(params, "fromX"), fromX) ||
-      !parseIntStrict(getParam(params, "fromY"), fromY) ||
-      !parseIntStrict(getParam(params, "toX"), toX) ||
-      !parseIntStrict(getParam(params, "toY"), toY))
-  {
-    throw runtime_error("Invalid move parameters.");
-  }
-
-  move.fromX = fromX;
-  move.fromY = fromY;
-  move.toX = toX;
-  move.toY = toY;
-  move.promotion = getParam(params, "promotion").empty() ? string("queen") : getParam(params, "promotion");
-  move.castle = getParam(params, "castle");
-  move.enPassant = getParam(params, "enPassant") == "true";
-  return move;
-}
-
-string RoomServer::roomIdFromPath(const string &path, const string &prefix)
-{
-  if (!startsWith(path, prefix))
-  {
-    return {};
-  }
-
-  const size_t suffixStart = prefix.size();
-  const size_t suffixEnd = path.find('/', suffixStart);
-  if (suffixEnd == string::npos)
-  {
-    return path.substr(suffixStart);
-  }
-
-  return path.substr(suffixStart, suffixEnd - suffixStart);
-}
-
 RoomServer::HttpRequest RoomServer::readRequest(sf::TcpSocket &socket)
 {
   string raw;
@@ -539,7 +460,12 @@ RoomServer::HttpRequest RoomServer::readRequest(sf::TcpSocket &socket)
   while (headerEnd == string::npos)
   {
     const sf::Socket::Status status = socket.receive(buffer, sizeof(buffer), received);
-    if (status != sf::Socket::Done)
+    if (status != sf::Socket::Done && status != sf::Socket::Partial)
+    {
+      break;
+    }
+
+    if (received == 0)
     {
       break;
     }
@@ -596,7 +522,12 @@ RoomServer::HttpRequest RoomServer::readRequest(sf::TcpSocket &socket)
   while (body.size() < contentLength)
   {
     const sf::Socket::Status status = socket.receive(buffer, sizeof(buffer), received);
-    if (status != sf::Socket::Done)
+    if (status != sf::Socket::Done && status != sf::Socket::Partial)
+    {
+      break;
+    }
+
+    if (received == 0)
     {
       break;
     }
@@ -636,24 +567,7 @@ void RoomServer::handleConnection(unique_ptr<sf::TcpSocket> socket)
 
   if (request.method == "GET" && request.path == "/")
   {
-    const string newRoomId = generateToken().substr(0, 8);
-    getRoom(newRoomId);
-    const string body;
-    ostringstream response;
-    response << statusLine(302) << "\r\n"
-             << "Location: /room/" << newRoomId << "\r\n"
-             << "Content-Length: " << body.size() << "\r\n"
-             << "Connection: close\r\n\r\n"
-             << body;
-    sendResponse(*socket, response.str());
-    return;
-  }
-
-  if (request.method == "GET" && startsWith(request.path, "/room/"))
-  {
-    const string pageRoomId = request.path.substr(string("/room/").size());
-    getRoom(pageRoomId);
-    const string html = roomHtml(pageRoomId);
+    const string html = pageHtml();
     ostringstream response;
     response << statusLine(200) << "\r\n"
              << "Content-Type: text/html; charset=utf-8\r\n"
@@ -717,37 +631,14 @@ void RoomServer::handleConnection(unique_ptr<sf::TcpSocket> socket)
     return;
   }
 
-  if (startsWith(request.path, "/api/room/") && request.path.find("/state") != string::npos)
+  if (request.method == "GET" && request.path == "/api/game/state")
   {
-    const string roomId = roomIdFromPath(request.path, "/api/room/");
-    auto room = getRoom(roomId);
-    const auto params = parseParams(request.query);
-    const string token = getParam(params, "token");
-    const string body = roomStateJson(*room, token);
-    ostringstream response;
-    response << statusLine(200) << "\r\n"
-             << "Content-Type: application/json; charset=utf-8\r\n"
-             << "Content-Length: " << body.size() << "\r\n"
-             << "Connection: close\r\n\r\n"
-             << body;
-    sendResponse(*socket, response.str());
-    return;
-  }
-
-  if (startsWith(request.path, "/api/room/") && request.path.find("/join") != string::npos)
-  {
-    const string roomId = roomIdFromPath(request.path, "/api/room/");
-    auto room = getRoom(roomId);
-    const auto params = parseParams(request.body);
-    string token = getParam(params, "token");
-    if (token.empty())
+    string body;
     {
-      token = generateToken();
+      lock_guard<mutex> guard(gameMutex_);
+      body = stateEnvelopeJson(state_);
     }
 
-    lock_guard<mutex> guard(room->mutex);
-    const string seat = assignSeat(*room, token);
-    const string body = joinResponseJson(*room, token, seat);
     ostringstream response;
     response << statusLine(200) << "\r\n"
              << "Content-Type: application/json; charset=utf-8\r\n"
@@ -758,12 +649,9 @@ void RoomServer::handleConnection(unique_ptr<sf::TcpSocket> socket)
     return;
   }
 
-  if (startsWith(request.path, "/api/room/") && request.path.find("/moves") != string::npos)
+  if (request.method == "GET" && request.path == "/api/game/moves")
   {
-    const string roomId = roomIdFromPath(request.path, "/api/room/");
-    auto room = getRoom(roomId);
     const auto params = parseParams(request.query);
-    const string token = getParam(params, "token");
     int x = 0;
     int y = 0;
 
@@ -780,22 +668,19 @@ void RoomServer::handleConnection(unique_ptr<sf::TcpSocket> socket)
       return;
     }
 
-    lock_guard<mutex> guard(room->mutex);
-    const string seat = seatForToken(*room, token);
-    if (seat != "white" && seat != "black")
+    vector<chess::Move> moves;
     {
-      const string body = "{\"moves\":[]}";
-      ostringstream response;
-      response << statusLine(200) << "\r\n"
-               << "Content-Type: application/json; charset=utf-8\r\n"
-               << "Content-Length: " << body.size() << "\r\n"
-               << "Connection: close\r\n\r\n"
-               << body;
-      sendResponse(*socket, response.str());
-      return;
+      lock_guard<mutex> guard(gameMutex_);
+      if (!state_.winner && !state_.draw && state_.turn == chess::Color::White)
+      {
+        const auto &piece = state_.board[y][x];
+        if (piece && piece->color == chess::Color::White)
+        {
+          moves = chess::legalMovesForPiece(state_, x, y);
+        }
+      }
     }
 
-    const vector<chess::Move> moves = chess::legalMovesForPiece(room->state, x, y);
     const string body = movesResponseJson(moves);
     ostringstream response;
     response << statusLine(200) << "\r\n"
@@ -807,78 +692,16 @@ void RoomServer::handleConnection(unique_ptr<sf::TcpSocket> socket)
     return;
   }
 
-  if (startsWith(request.path, "/api/room/") && request.path.find("/move") != string::npos)
+  if (request.method == "POST" && request.path == "/api/game/new")
   {
-    const string roomId = roomIdFromPath(request.path, "/api/room/");
-    auto room = getRoom(roomId);
-    const auto params = parseParams(request.body);
-    const string token = getParam(params, "token");
-    chess::Move move;
+    resetGame();
 
-    try
+    string body;
     {
-      move = parseMoveParams(params);
-    }
-    catch (const exception &error)
-    {
-      const string body = string("{\"error\":\"") + jsonEscape(error.what()) + "\"}";
-      ostringstream response;
-      response << statusLine(400) << "\r\n"
-               << "Content-Type: application/json; charset=utf-8\r\n"
-               << "Content-Length: " << body.size() << "\r\n"
-               << "Connection: close\r\n\r\n"
-               << body;
-      sendResponse(*socket, response.str());
-      return;
+      lock_guard<mutex> guard(gameMutex_);
+      body = stateEnvelopeJson(state_);
     }
 
-    lock_guard<mutex> guard(room->mutex);
-    const string seat = seatForToken(*room, token);
-    if (seat != "white" && seat != "black")
-    {
-      const string body = "{\"error\":\"You are not seated in this room.\"}";
-      ostringstream response;
-      response << statusLine(403) << "\r\n"
-               << "Content-Type: application/json; charset=utf-8\r\n"
-               << "Content-Length: " << body.size() << "\r\n"
-               << "Connection: close\r\n\r\n"
-               << body;
-      sendResponse(*socket, response.str());
-      return;
-    }
-
-    if (room->state.turn != (seat == "white" ? chess::Color::White : chess::Color::Black) || room->state.winner || room->state.draw)
-    {
-      const string body = "{\"error\":\"It is not your turn.\"}";
-      ostringstream response;
-      response << statusLine(400) << "\r\n"
-               << "Content-Type: application/json; charset=utf-8\r\n"
-               << "Content-Length: " << body.size() << "\r\n"
-               << "Connection: close\r\n\r\n"
-               << body;
-      sendResponse(*socket, response.str());
-      return;
-    }
-
-    try
-    {
-      room->state = chess::applyMove(room->state, move);
-      room->updatedAt = makeTimestamp();
-    }
-    catch (const exception &error)
-    {
-      const string body = string("{\"error\":\"") + jsonEscape(error.what()) + "\"}";
-      ostringstream response;
-      response << statusLine(400) << "\r\n"
-               << "Content-Type: application/json; charset=utf-8\r\n"
-               << "Content-Length: " << body.size() << "\r\n"
-               << "Connection: close\r\n\r\n"
-               << body;
-      sendResponse(*socket, response.str());
-      return;
-    }
-
-    const string body = string("{\"ok\":true,\"state\":") + chess::stateToJson(room->state) + "}";
     ostringstream response;
     response << statusLine(200) << "\r\n"
              << "Content-Type: application/json; charset=utf-8\r\n"
@@ -886,87 +709,119 @@ void RoomServer::handleConnection(unique_ptr<sf::TcpSocket> socket)
              << "Connection: close\r\n\r\n"
              << body;
     sendResponse(*socket, response.str());
-
-    const vector<shared_ptr<Subscriber>> subscribers = room->subscribers;
-    for (const auto &subscriber : subscribers)
-    {
-      if (!subscriber || !subscriber->alive.load())
-      {
-        continue;
-      }
-
-      const string payload = string("data: ") + eventPayloadJson(*room, subscriber->token) + "\n\n";
-      lock_guard<mutex> socketGuard(subscriber->writeMutex);
-      if (!writeAll(*subscriber->socket, payload))
-      {
-        subscriber->alive.store(false);
-      }
-    }
-
-    room->subscribers.erase(remove_if(room->subscribers.begin(), room->subscribers.end(), [](const shared_ptr<Subscriber> &subscriber)
-    {
-      return !subscriber || !subscriber->alive.load();
-    }), room->subscribers.end());
-
     return;
   }
 
-  if (startsWith(request.path, "/api/room/") && request.path.find("/events") != string::npos)
+  if (request.method == "POST" && request.path == "/api/game/move")
   {
-    const string roomId = roomIdFromPath(request.path, "/api/room/");
-    auto room = getRoom(roomId);
-    const auto params = parseParams(request.query);
-    const string token = getParam(params, "token");
+    const auto params = parseParams(request.body);
+    chess::Move move;
 
-    auto subscriber = make_shared<Subscriber>();
-    subscriber->socket = shared_ptr<sf::TcpSocket>(socket.release());
-    subscriber->token = token;
-
+    if (!parseIntStrict(getParam(params, "fromX"), move.fromX) ||
+        !parseIntStrict(getParam(params, "fromY"), move.fromY) ||
+        !parseIntStrict(getParam(params, "toX"), move.toX) ||
+        !parseIntStrict(getParam(params, "toY"), move.toY))
     {
-      lock_guard<mutex> guard(room->mutex);
-      room->subscribers.push_back(subscriber);
+      const string body = "{\"error\":\"Invalid move parameters.\"}";
+      ostringstream response;
+      response << statusLine(400) << "\r\n"
+               << "Content-Type: application/json; charset=utf-8\r\n"
+               << "Content-Length: " << body.size() << "\r\n"
+               << "Connection: close\r\n\r\n"
+               << body;
+      sendResponse(*socket, response.str());
+      return;
     }
 
-    ostringstream headers;
-    headers << statusLine(200) << "\r\n"
-            << "Content-Type: text/event-stream; charset=utf-8\r\n"
-            << "Cache-Control: no-cache, no-transform\r\n"
-            << "Connection: keep-alive\r\n"
-            << "X-Accel-Buffering: no\r\n\r\n";
-    writeAll(*subscriber->socket, headers.str());
+    move.promotion = getParam(params, "promotion").empty() ? string("queen") : getParam(params, "promotion");
+    move.castle = getParam(params, "castle");
+    move.enPassant = getParam(params, "enPassant") == "true";
 
     {
-      lock_guard<mutex> guard(room->mutex);
-      const string payload = string("data: ") + eventPayloadJson(*room, token) + "\n\n";
-      writeAll(*subscriber->socket, payload);
-    }
-
-    while (running_ && subscriber->alive.load())
-    {
-      this_thread::sleep_for(chrono::seconds(25));
-      lock_guard<mutex> socketGuard(subscriber->writeMutex);
-      if (!writeAll(*subscriber->socket, ": keep-alive\n\n"))
+      lock_guard<mutex> guard(gameMutex_);
+      if (state_.winner || state_.draw)
       {
-        subscriber->alive.store(false);
-        break;
+        const string body = "{\"error\":\"Game is already over.\"}";
+        ostringstream response;
+        response << statusLine(400) << "\r\n"
+                 << "Content-Type: application/json; charset=utf-8\r\n"
+                 << "Content-Length: " << body.size() << "\r\n"
+                 << "Connection: close\r\n\r\n"
+                 << body;
+        sendResponse(*socket, response.str());
+        return;
+      }
+
+      if (state_.turn != chess::Color::White)
+      {
+        const string body = "{\"error\":\"Wait for bot move.\"}";
+        ostringstream response;
+        response << statusLine(400) << "\r\n"
+                 << "Content-Type: application/json; charset=utf-8\r\n"
+                 << "Content-Length: " << body.size() << "\r\n"
+                 << "Connection: close\r\n\r\n"
+                 << body;
+        sendResponse(*socket, response.str());
+        return;
+      }
+
+      try
+      {
+        state_ = chess::applyMove(state_, move);
+      }
+      catch (const exception &error)
+      {
+        const string body = string("{\"error\":\"") + jsonEscape(error.what()) + "\"}";
+        ostringstream response;
+        response << statusLine(400) << "\r\n"
+                 << "Content-Type: application/json; charset=utf-8\r\n"
+                 << "Content-Length: " << body.size() << "\r\n"
+                 << "Connection: close\r\n\r\n"
+                 << body;
+        sendResponse(*socket, response.str());
+        return;
       }
     }
 
+    string body;
     {
-      lock_guard<mutex> guard(room->mutex);
-      room->subscribers.erase(remove_if(room->subscribers.begin(), room->subscribers.end(), [&](const shared_ptr<Subscriber> &item)
-      {
-        return item == subscriber || !item || !item->alive.load();
-      }), room->subscribers.end());
+      lock_guard<mutex> guard(gameMutex_);
+      body = string("{\"ok\":true,\"state\":") + chess::stateToJson(state_) + "}";
     }
 
+    ostringstream response;
+    response << statusLine(200) << "\r\n"
+             << "Content-Type: application/json; charset=utf-8\r\n"
+             << "Content-Length: " << body.size() << "\r\n"
+             << "Connection: close\r\n\r\n"
+             << body;
+    sendResponse(*socket, response.str());
+    return;
+  }
+
+  if (request.method == "POST" && request.path == "/api/game/bot-move")
+  {
+    applyBotMove();
+
+    string body;
+    {
+      lock_guard<mutex> guard(gameMutex_);
+      body = string("{\"ok\":true,\"state\":") + chess::stateToJson(state_) + "}";
+    }
+
+    ostringstream response;
+    response << statusLine(200) << "\r\n"
+             << "Content-Type: application/json; charset=utf-8\r\n"
+             << "Content-Length: " << body.size() << "\r\n"
+             << "Connection: close\r\n\r\n"
+             << body;
+    sendResponse(*socket, response.str());
     return;
   }
 
   if (request.method == "GET" && request.path == "/health")
   {
-    lock_guard<mutex> guard(roomsMutex_);
-    const string body = "{\"ok\":true,\"rooms\":" + to_string(rooms_.size()) + "}";
+    const string body = "{\"ok\":true,\"mode\":\"singleplayer\"}";
     ostringstream response;
     response << statusLine(200) << "\r\n"
              << "Content-Type: application/json; charset=utf-8\r\n"

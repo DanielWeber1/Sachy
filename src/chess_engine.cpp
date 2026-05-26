@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <tuple>
 
+using namespace std;
+
 namespace chess
 {
   namespace
@@ -36,14 +38,14 @@ namespace chess
       Board board{};
       for (auto &row : board)
       {
-        row.fill(std::nullopt);
+        row.fill(nullopt);
       }
       return board;
     }
 
-    std::string jsonEscape(const std::string &value)
+    string jsonEscape(const string &value)
     {
-      std::ostringstream out;
+      ostringstream out;
       for (char ch : value)
       {
         switch (ch)
@@ -71,44 +73,44 @@ namespace chess
       return out.str();
     }
 
-    std::string optionalStringJson(const std::string &value)
+    string optionalStringJson(const string &value)
     {
       if (value.empty())
       {
         return "null";
       }
 
-      return std::string("\"") + jsonEscape(value) + "\"";
+      return string("\"") + jsonEscape(value) + "\"";
     }
 
-    std::string pieceJson(const BoardCell &piece)
+    string pieceJson(const BoardCell &piece)
     {
       if (!piece)
       {
         return "null";
       }
 
-      std::ostringstream out;
+      ostringstream out;
       out << "{\"color\":\"" << colorToString(piece->color)
           << "\",\"type\":\"" << pieceTypeToString(piece->type) << "\"}";
       return out.str();
     }
 
-    std::string positionJson(const std::optional<Position> &position)
+    string positionJson(const optional<Position> &position)
     {
       if (!position)
       {
         return "null";
       }
 
-      std::ostringstream out;
+      ostringstream out;
       out << "{\"x\":" << position->x << ",\"y\":" << position->y << "}";
       return out.str();
     }
 
-    std::string boardJson(const Board &board)
+    string boardJson(const Board &board)
     {
-      std::ostringstream out;
+      ostringstream out;
       out << "[";
       for (int y = 0; y < 8; ++y)
       {
@@ -133,9 +135,9 @@ namespace chess
       return out.str();
     }
 
-    std::string castlingJson(const std::array<CastlingRights, 2> &castling)
+    string castlingJson(const array<CastlingRights, 2> &castling)
     {
-      std::ostringstream out;
+      ostringstream out;
       out << "{"
           << "\"white\":{\"kingSide\":" << (castling[colorIndex(Color::White)].kingSide ? "true" : "false")
           << ",\"queenSide\":" << (castling[colorIndex(Color::White)].queenSide ? "true" : "false") << "},"
@@ -145,22 +147,22 @@ namespace chess
       return out.str();
     }
 
-    std::string moveJson(const Move &move)
+    string moveJson(const Move &move)
     {
-      std::ostringstream out;
+      ostringstream out;
       out << "{"
           << "\"fromX\":" << move.fromX << ","
           << "\"fromY\":" << move.fromY << ","
           << "\"toX\":" << move.toX << ","
           << "\"toY\":" << move.toY << ","
-          << "\"promotion\":\"" << jsonEscape(move.promotion.empty() ? std::string("queen") : move.promotion) << "\","
+          << "\"promotion\":\"" << jsonEscape(move.promotion.empty() ? string("queen") : move.promotion) << "\","
           << "\"castle\":" << optionalStringJson(move.castle) << ","
           << "\"enPassant\":" << (move.enPassant ? "true" : "false")
           << "}";
       return out.str();
     }
 
-    std::optional<Position> findKing(const Board &board, Color color)
+    optional<Position> findKing(const Board &board, Color color)
     {
       for (int y = 0; y < 8; ++y)
       {
@@ -174,7 +176,7 @@ namespace chess
         }
       }
 
-      return std::nullopt;
+      return nullopt;
     }
 
     bool isSquareAttacked(const Board &board, int x, int y, Color byColor)
@@ -195,7 +197,7 @@ namespace chess
         }
       }
 
-      constexpr std::array<std::pair<int, int>, 8> knightOffsets = {{{-2, -1}, {-1, -2}, {1, -2}, {2, -1}, {2, 1}, {1, 2}, {-1, 2}, {-2, 1}}};
+      constexpr array<pair<int, int>, 8> knightOffsets = {{{-2, -1}, {-1, -2}, {1, -2}, {2, -1}, {2, 1}, {1, 2}, {-1, 2}, {-2, 1}}};
       for (const auto &[dx, dy] : knightOffsets)
       {
         const int knightX = x + dx;
@@ -212,15 +214,15 @@ namespace chess
         }
       }
 
-      const std::array<std::tuple<int, int, std::array<PieceType, 2>>, 8> lineChecks = {{
-        std::make_tuple(1, 0, std::array<PieceType, 2>{PieceType::Rook, PieceType::Queen}),
-        std::make_tuple(-1, 0, std::array<PieceType, 2>{PieceType::Rook, PieceType::Queen}),
-        std::make_tuple(0, 1, std::array<PieceType, 2>{PieceType::Rook, PieceType::Queen}),
-        std::make_tuple(0, -1, std::array<PieceType, 2>{PieceType::Rook, PieceType::Queen}),
-        std::make_tuple(1, 1, std::array<PieceType, 2>{PieceType::Bishop, PieceType::Queen}),
-        std::make_tuple(1, -1, std::array<PieceType, 2>{PieceType::Bishop, PieceType::Queen}),
-        std::make_tuple(-1, 1, std::array<PieceType, 2>{PieceType::Bishop, PieceType::Queen}),
-        std::make_tuple(-1, -1, std::array<PieceType, 2>{PieceType::Bishop, PieceType::Queen}),
+      const array<tuple<int, int, array<PieceType, 2>>, 8> lineChecks = {{
+        make_tuple(1, 0, array<PieceType, 2>{PieceType::Rook, PieceType::Queen}),
+        make_tuple(-1, 0, array<PieceType, 2>{PieceType::Rook, PieceType::Queen}),
+        make_tuple(0, 1, array<PieceType, 2>{PieceType::Rook, PieceType::Queen}),
+        make_tuple(0, -1, array<PieceType, 2>{PieceType::Rook, PieceType::Queen}),
+        make_tuple(1, 1, array<PieceType, 2>{PieceType::Bishop, PieceType::Queen}),
+        make_tuple(1, -1, array<PieceType, 2>{PieceType::Bishop, PieceType::Queen}),
+        make_tuple(-1, 1, array<PieceType, 2>{PieceType::Bishop, PieceType::Queen}),
+        make_tuple(-1, -1, array<PieceType, 2>{PieceType::Bishop, PieceType::Queen}),
       }};
 
       for (const auto &[dx, dy, types] : lineChecks)
@@ -291,11 +293,11 @@ namespace chess
 
       if (!pieceValue)
       {
-        throw std::runtime_error("No piece selected.");
+        throw runtime_error("No piece selected.");
       }
 
       const BoardCell target = nextState.board[move.toY][move.toX];
-      nextState.enPassant = std::nullopt;
+      nextState.enPassant = nullopt;
 
       if (!move.castle.empty())
       {
@@ -304,9 +306,9 @@ namespace chess
         const int rookFromX = kingSide ? 7 : 0;
         const int rookToX = kingSide ? 5 : 3;
 
-        nextState.board[move.fromY][move.fromX] = std::nullopt;
+        nextState.board[move.fromY][move.fromX] = nullopt;
         nextState.board[move.toY][move.toX] = *pieceValue;
-        nextState.board[row][rookFromX] = std::nullopt;
+        nextState.board[row][rookFromX] = nullopt;
         nextState.board[row][rookToX] = target;
 
         nextState.castling[colorIndex(pieceValue->color)].kingSide = false;
@@ -314,17 +316,17 @@ namespace chess
       }
       else
       {
-        nextState.board[move.fromY][move.fromX] = std::nullopt;
+        nextState.board[move.fromY][move.fromX] = nullopt;
 
         if (move.enPassant)
         {
           const int direction = pieceValue->color == Color::White ? 1 : -1;
-          nextState.board[move.toY + direction][move.toX] = std::nullopt;
+          nextState.board[move.toY + direction][move.toX] = nullopt;
         }
 
         nextState.board[move.toY][move.toX] = *pieceValue;
 
-        if (pieceValue->type == PieceType::Pawn && std::abs(move.toY - move.fromY) == 2)
+        if (pieceValue->type == PieceType::Pawn && abs(move.toY - move.fromY) == 2)
         {
           nextState.enPassant = Position{move.fromX, (move.fromY + move.toY) / 2};
         }
@@ -394,7 +396,7 @@ namespace chess
       return nextState;
     }
 
-    std::vector<Move> generatePseudoMoves(const State &state, int x, int y)
+    vector<Move> generatePseudoMoves(const State &state, int x, int y)
     {
       const BoardCell &pieceValue = state.board[y][x];
       if (!pieceValue)
@@ -402,7 +404,7 @@ namespace chess
         return {};
       }
 
-      std::vector<Move> moves;
+      vector<Move> moves;
       const int direction = pieceValue->color == Color::White ? -1 : 1;
       const int startRow = pieceValue->color == Color::White ? 6 : 1;
       const int promotionRow = pieceValue->color == Color::White ? 0 : 7;
@@ -458,7 +460,7 @@ namespace chess
 
       if (pieceValue->type == PieceType::Knight)
       {
-        constexpr std::array<std::pair<int, int>, 8> offsets = {{{-2, -1}, {-1, -2}, {1, -2}, {2, -1}, {2, 1}, {1, 2}, {-1, 2}, {-2, 1}}};
+        constexpr array<pair<int, int>, 8> offsets = {{{-2, -1}, {-1, -2}, {1, -2}, {2, -1}, {2, 1}, {1, 2}, {-1, 2}, {-2, 1}}};
         for (const auto &[dx, dy] : offsets)
         {
           const int targetX = x + dx;
@@ -478,7 +480,7 @@ namespace chess
         return moves;
       }
 
-      std::vector<std::pair<int, int>> directions;
+      vector<pair<int, int>> directions;
       if (pieceValue->type == PieceType::Bishop || pieceValue->type == PieceType::Queen)
       {
         directions.push_back({1, 1});
@@ -603,7 +605,7 @@ namespace chess
         && left.enPassant == right.enPassant;
     }
 
-    std::vector<Move> legalMovesForPieceInternal(const State &state, int x, int y)
+    vector<Move> legalMovesForPieceInternal(const State &state, int x, int y)
     {
       const BoardCell &pieceValue = state.board[y][x];
       if (!pieceValue || pieceValue->color != state.turn || state.winner || state.draw)
@@ -611,8 +613,8 @@ namespace chess
         return {};
       }
 
-      const std::vector<Move> pseudoMoves = generatePseudoMoves(state, x, y);
-      std::vector<Move> legalMoves;
+      const vector<Move> pseudoMoves = generatePseudoMoves(state, x, y);
+      vector<Move> legalMoves;
 
       for (const Move &move : pseudoMoves)
       {
@@ -627,12 +629,12 @@ namespace chess
     }
   }
 
-  std::string colorToString(Color color)
+  string colorToString(Color color)
   {
     return color == Color::White ? "white" : "black";
   }
 
-  std::string pieceTypeToString(PieceType type)
+  string pieceTypeToString(PieceType type)
   {
     switch (type)
     {
@@ -651,7 +653,7 @@ namespace chess
   {
     State state;
     state.board = emptyBoard();
-    const std::array<PieceType, 8> backRank = {PieceType::Rook, PieceType::Knight, PieceType::Bishop, PieceType::Queen, PieceType::King, PieceType::Bishop, PieceType::Knight, PieceType::Rook};
+    const array<PieceType, 8> backRank = {PieceType::Rook, PieceType::Knight, PieceType::Bishop, PieceType::Queen, PieceType::King, PieceType::Bishop, PieceType::Knight, PieceType::Rook};
 
     for (int x = 0; x < 8; ++x)
     {
@@ -668,17 +670,17 @@ namespace chess
     return state;
   }
 
-  std::vector<Move> legalMovesForPiece(const State &state, int x, int y)
+  vector<Move> legalMovesForPiece(const State &state, int x, int y)
   {
     return legalMovesForPieceInternal(state, x, y);
   }
 
-  std::vector<Move> legalMovesForColor(const State &state, Color color)
+  vector<Move> legalMovesForColor(const State &state, Color color)
   {
     State filtered = state;
     filtered.turn = color;
 
-    std::vector<Move> moves;
+    vector<Move> moves;
     for (int y = 0; y < 8; ++y)
     {
       for (int x = 0; x < 8; ++x)
@@ -686,7 +688,7 @@ namespace chess
         const BoardCell &current = state.board[y][x];
         if (current && current->color == color)
         {
-          const std::vector<Move> pieceMoves = legalMovesForPieceInternal(filtered, x, y);
+          const vector<Move> pieceMoves = legalMovesForPieceInternal(filtered, x, y);
           moves.insert(moves.end(), pieceMoves.begin(), pieceMoves.end());
         }
       }
@@ -704,29 +706,29 @@ namespace chess
 
     if (!inBounds(fromX, fromY) || !inBounds(toX, toY))
     {
-      throw std::runtime_error("Move is outside the board.");
+      throw runtime_error("Move is outside the board.");
     }
 
     const BoardCell &selected = state.board[fromY][fromX];
     if (!selected)
     {
-      throw std::runtime_error("No piece on the selected square.");
+      throw runtime_error("No piece on the selected square.");
     }
 
     if (selected->color != state.turn)
     {
-      throw std::runtime_error("That piece cannot move right now.");
+      throw runtime_error("That piece cannot move right now.");
     }
 
-    const std::vector<Move> legalMoves = legalMovesForPieceInternal(state, fromX, fromY);
-    const auto normalized = std::find_if(legalMoves.begin(), legalMoves.end(), [&](const Move &candidate)
+    const vector<Move> legalMoves = legalMovesForPieceInternal(state, fromX, fromY);
+    const auto normalized = find_if(legalMoves.begin(), legalMoves.end(), [&](const Move &candidate)
     {
       return moveEquivalent(candidate, move);
     });
 
     if (normalized == legalMoves.end())
     {
-      throw std::runtime_error("Illegal move.");
+      throw runtime_error("Illegal move.");
     }
 
     Move normalizedMove = *normalized;
@@ -739,9 +741,9 @@ namespace chess
 
     nextState.check = isKingInCheck(nextState.board, nextState.turn);
     nextState.draw = false;
-    nextState.winner = std::nullopt;
+    nextState.winner = nullopt;
 
-    const std::vector<Move> legalNextMoves = legalMovesForColor(nextState, nextState.turn);
+    const vector<Move> legalNextMoves = legalMovesForColor(nextState, nextState.turn);
     if (legalNextMoves.empty())
     {
       if (nextState.check)
@@ -763,16 +765,16 @@ namespace chess
     return nextState;
   }
 
-  std::string moveToJson(const Move &move)
+  string moveToJson(const Move &move)
   {
     return moveJson(move);
   }
 
-  std::string movesToJson(const std::vector<Move> &moves)
+  string movesToJson(const vector<Move> &moves)
   {
-    std::ostringstream out;
+    ostringstream out;
     out << "{\"moves\":[";
-    for (std::size_t i = 0; i < moves.size(); ++i)
+    for (size_t i = 0; i < moves.size(); ++i)
     {
       if (i > 0)
       {
@@ -785,15 +787,15 @@ namespace chess
     return out.str();
   }
 
-  std::string stateToJson(const State &state)
+  string stateToJson(const State &state)
   {
-    std::ostringstream out;
+    ostringstream out;
     out << "{"
         << "\"board\":" << boardJson(state.board) << ","
         << "\"turn\":\"" << colorToString(state.turn) << "\","
         << "\"castling\":" << castlingJson(state.castling) << ","
         << "\"enPassant\":" << positionJson(state.enPassant) << ","
-        << "\"lastMove\":" << (state.lastMove ? moveJson(*state.lastMove) : std::string("null")) << ","
+        << "\"lastMove\":" << (state.lastMove ? moveJson(*state.lastMove) : string("null")) << ","
         << "\"check\":" << (state.check ? "true" : "false") << ","
         << "\"draw\":" << (state.draw ? "true" : "false") << ","
         << "\"winner\":";
